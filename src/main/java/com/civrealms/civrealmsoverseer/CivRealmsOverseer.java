@@ -1,35 +1,35 @@
 package main.java.com.civrealms.civrealmsoverseer;
 
+//java google etc
 import java.io.IOException;
 import java.sql.Connection;
-import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.plugin.java.JavaPlugin;
 import com.google.common.io.ByteArrayDataInput;
+import com.google.common.io.ByteArrayDataOutput;
 import com.google.common.io.ByteStreams;
 import java.io.DataInputStream;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.logging.Logger;
-import org.bukkit.event.Listener;
-import org.bukkit.entity.Player;
 import java.util.UUID;
-import org.bukkit.Bukkit;
-import org.bukkit.World;
-import org.bukkit.plugin.messaging.PluginMessageListener;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
-import java.util.Iterator;
+
+//bukkit
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.event.Listener;
+import org.bukkit.entity.Player;
+import org.bukkit.Bukkit;
+import org.bukkit.World;
+import org.bukkit.plugin.messaging.PluginMessageListener;
 import org.bukkit.Location;
 import org.bukkit.scheduler.BukkitRunnable;
 
-/**
- *  
- */
 public class CivRealmsOverseer
         extends JavaPlugin
         implements Listener, PluginMessageListener {
@@ -43,9 +43,8 @@ public class CivRealmsOverseer
     private String password;
     private int port;
     private String worldName;
-    public HashMap<Location,ArrayList<String>> portalLedger = new HashMap<Location,ArrayList<String>>(); //Location is a location, String list is a list of worlds that have that location lit.
-    //reply and ignore should go in a DB to share... ugh
-
+    public HashMap<Location,ArrayList<String>> portalLedger = new HashMap<Location,ArrayList<String>>(); //Location is a location, String list is a list of worlds that have that location with a portal lit.
+    
     public static Logger LOG = Logger.getLogger("CivRealmChat");
     
     public void onEnable() {
@@ -56,37 +55,23 @@ public class CivRealmsOverseer
         getServer().getPluginManager().registerEvents(this, this);
         getServer().getPluginManager().registerEvents(new CivRealmsOverseerListener(), this);
 
-        //database is namelayer one for UUIDs and names and groups available
         //init DB connection
         this.host = this.config.getString("hostname");
-        this.port = 3306;
+        this.port = this.config.getInt("port");
         this.database = this.config.getString("database");
         this.username = this.config.getString("username");
         this.password = this.config.getString("password");
         this.worldName = this.config.getString("worldName");
         
-        //load up fingerprints from DB
+        //load up known prison portal locations
         loadPrisonPortals();
         
-        //create player routing table if none
+        //create player routing table if none. This is where people should show up and with what inventory when they login next.
         initPlayerRoutingTable();
     }
     
-    public void sendToBungee(Player player, byte[] message){
-        player.sendPluginMessage(this, "BungeeCord", message);
-    }
-    
-    public String StringArrayMinusNWords(String[] pieces, int n){
-        String singleMessageString = "";
-        for (int i = n; i < pieces.length; i++) {
-            singleMessageString = singleMessageString + pieces[i];
-            if (i < pieces.length) {
-                singleMessageString = singleMessageString + " ";
-            }
-        }
-        return singleMessageString;
-    }
-    
+    //This just actually sends them there via bungee, it does not (yet at least, might be a good idea) properly log their arrival coords desired and their inventory on arrival
+    //(i.e. eventually it should have a CRO_tp_announce built in?)
     public void sendPlayerSomewhere(String playerToSendUUID, String targetServerName){
         ByteArrayOutputStream b = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(b);
@@ -102,12 +87,11 @@ public class CivRealmsOverseer
 
     @Override
     public void onPluginMessageReceived(String channel, Player recipient, byte[] message) {
-        //INCOMING chat messages from other servers:
-            //Common format: "BungeeCord" then [subchannel "Forward" and its various arguments] 
-            //then [plugin name "CivRealmOverseer"] then [command name like "tell"]
-            //then [sender] then [payload which is basically everything after the command]
+        //FORMAT FOR ALL INCOMING messages from other servers:
+            //Common format no matter what: "BungeeCord" then [subchannel "Forward" and its various arguments] 
+            //then [plugin name "CivRealmOverseer"] then [command name like "CRO_tp_announce" for example]
+            //then payload: just everything else, depends on the command what is what here
         if (!channel.equals("BungeeCord")) {
-            LOG.info("CROverseer: plugin message channel was non-Bungee, that shouldn't be happening here?");
             return;
         }
         ByteArrayDataInput in = ByteStreams.newDataInput(message);
@@ -116,7 +100,7 @@ public class CivRealmsOverseer
             return;
         }
         
-        LOG.info("CROverseer found a plugin message intended for it.");
+        //LOG.info("[debug] CROverseer found a plugin message intended for it.");
         short len = in.readShort();
         byte[] msgbytes = new byte[len];
         in.readFully(msgbytes);
@@ -124,15 +108,17 @@ public class CivRealmsOverseer
         try {
             //More stuff common to all incoming messages:
             String command = msgin.readUTF();
-            Bukkit.getLogger().info("command: " + command);
-            String sender = msgin.readUTF();
-            String commandMessage = msgin.readUTF();
+            LOG.info("(debug) [CROverseer] command received, type: " + command);
             
-            //########### Command-specific instructions: #############
+            //###############
+            //If or switch statement or whatever, checking which "command" it is, an then doing various
+            //msgin.readInt(), msgin.readUTF() etc. etc. as appropriate to that command.
+            //###############
             
-            /*if (command.equals("AnnouncePlayerSend")){ //one server telling another the location the person should show up when they arrive any moment now
+            /*if (command.equals("CRO_tp_announce")){ //one server telling another the location the person should show up when they arrive any moment now
                 //Somebody is about to come to a world. Sender is the person, message contains their UUID, target world, X,Y,Z of the block for them to stand on, and inventory.
                 try {
+                    String name = msgin.readUTF();
                     UUID uuid = UUID.fromString(msgin.readUTF());
                     String targetWorld = msgin.readUTF();
                     if (targetWorld != worldName){
@@ -143,20 +129,59 @@ public class CivRealmsOverseer
                     int z = msgin.readInt();
                     String inventoryString = msgin.readUTF();
                     
-                    //######### lookup 
+                    //######### inventory parsing stuff, needs to be redone better 
+                    //and actually store the results in memory for when they arrive, blah blah
                     
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
             } else */if (command.equals("ErrorFeedback")) {
                 //A message that just dumps raw error text to display to a particular user for all sorts of cross-world feedback about checks that failed, etc.
-                //borrow code from echo thing below commented out
-            } else if (command.equals("foobar")) {
-                // fillers/examples
+                //not actually needed yet for anything.
             }
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+    
+    //############## Various possible commands as separate methods like the following one, since they all have totally different parameters needed:
+    
+    //for telling another server that this player will be arriving, and this is where we want them to go and with what inventory:
+    public ByteArrayOutputStream msgPrep_CRO_tp_announce(Player playerToTP, int x, int y, int z, String targetWorld){
+        ByteArrayOutputStream msgbytes = new ByteArrayOutputStream(); //these two lines just at the top of every command prep, rest of junk in "msgSend" generic method
+        DataOutputStream msgout = new DataOutputStream(msgbytes);
+        try{
+            msgout.writeUTF("CRO_tp_announce");
+            msgout.writeUTF(playerToTP.getDisplayName());
+            msgout.writeUTF(playerToTP.getUniqueId().toString());
+            msgout.writeUTF(targetWorld);
+            msgout.writeInt(x);
+            msgout.writeInt(y);
+            msgout.writeInt(z);
+            msgout.writeUTF(serializeInventory(playerToTP));
+        } catch(IOException e){e.printStackTrace();}
+        return msgbytes;
+    }
+    
+    //assuming for now we won't ever have a reason to send to another plugin than this, but just in case, two methods:
+    public void msgSend(Player sender, String command, ByteArrayOutputStream payload){
+        msgSend(sender, command, payload, "CivRealmOverseer");
+    }
+    
+    public void msgSend(Player sender, String command, ByteArrayOutputStream payload, String intendedPlugin){
+        ByteArrayDataOutput out = ByteStreams.newDataOutput();
+        out.writeUTF("Forward");
+        out.writeUTF("ALL");
+        out.writeUTF(intendedPlugin);
+        out.writeShort(payload.toByteArray().length);
+        out.write(payload.toByteArray());
+        sender.sendPluginMessage(this, "BungeeCord", out.toByteArray());
+        LOG.info("[CROverseer]: sent pluginMessage, command: " + command + ", payload: " + out.toString());
+    }
+    
+    public String serializeInventory(Player p){
+        //######### TO DO
+        return null;
     }
     
     public void openConnection() {
@@ -206,16 +231,6 @@ public class CivRealmsOverseer
                 }
             }
             if (!statement.isClosed()){statement.close();};
-        } catch (SQLException e){
-            e.printStackTrace();
-        }
-    }
-    
-    public void initPlayerRoutingTable(){
-        try{
-            openConnection();
-            Statement statement = this.connection.createStatement();
-            statement.executeUpdate("create table if not exists `overseer_player_routing` (`uuid` VARCHAR(100) PRIMARY KEY, `target_x` INT(10), `target_y` INT(10), `target_z` INT(10),`target_world` VARCHAR(100)), `inventory` VARCHAR(max);");
         } catch (SQLException e){
             e.printStackTrace();
         }
@@ -320,5 +335,15 @@ public class CivRealmsOverseer
         
     public Connection getConnection(){
         return connection;
+    }
+    
+    public void initPlayerRoutingTable(){
+        try{
+            openConnection();
+            Statement statement = this.connection.createStatement();
+            statement.executeUpdate("create table if not exists `overseer_player_routing` (`uuid` VARCHAR(100) PRIMARY KEY, `target_x` INT(10), `target_y` INT(10), `target_z` INT(10),`target_world` VARCHAR(100)), `inventory` VARCHAR(max);");
+        } catch (SQLException e){
+            e.printStackTrace();
+        }
     }
 }
